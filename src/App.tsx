@@ -105,7 +105,11 @@ function App() {
           >
             <CharacterController ref={characterRef} />
             <Ground />
+          {/*
             <Balls />
+            Disabled: placeholder physics stress-test objects (spawns ~300 rigid bodies).
+            Re-enable for debugging collisions/materials/perf.
+          */}
           </Physics>
           <FollowCamera target={characterRef} />
           <EffectComposer>
