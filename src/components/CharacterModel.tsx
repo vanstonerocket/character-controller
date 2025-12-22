@@ -4,13 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Vector3 } from "three";
 import type { AnimationAction, Bone } from "three";
 
+import { FaceManager } from "../utils/FaceManager";
+
 type CharacterModelProps = {
   isMoving: boolean;
   isSprinting: boolean;
   isGrounded: boolean;
 } & JSX.IntrinsicElements["group"];
 
-const RPM_URL = "https://models.readyplayer.me/6851995def31fd3e1a8f1fdb.glb";
+const RPM_URL =
+  "https://models.readyplayer.me/6851995def31fd3e1a8f1fdb.glb?morphTargets=ARKit,OculusVisemes";
 
 /**
  * NOTE:
@@ -28,11 +31,6 @@ const WALK_ANIM_URL = "/animation/F_Walk_002.glb";
 const RUN_ANIM_URL = "/animation/F_Run_001.glb";
 const FALL_ANIM_URL = "/animation/F_Falling_Idle_000.glb";
 
-/**
- * Resolve an AnimationAction dynamically by keyword matching.
- * This avoids hard-coding clip names and makes the system resilient
- * to renamed or swapped animation assets.
- */
 function resolveAction(
   actions: Record<string, AnimationAction | undefined>,
   keywords: string[]
@@ -55,43 +53,37 @@ export function CharacterModel({
 }: CharacterModelProps) {
   const group = useRef<Group>(null);
 
-  /**
-   * Track the currently playing animation ACTION,
-   * not a string name. This allows robust blending
-   * even when clip names change.
-   */
   const [current, setCurrent] = useState<{
     name: string;
     action: AnimationAction;
   } | null>(null);
 
-  /**
-   * Root motion suppression
-   *
-   * These refs store:
-   * - the root bone of the avatar skeleton
-   * - its original position (used as a baseline)
-   *
-   * This is a TEMPORARY runtime fix to cancel
-   * forward translation coming from placeholder animations.
-   */
+  // TEMP root motion suppression
   const rootBoneRef = useRef<Bone | null>(null);
   const rootBasePosRef = useRef<Vector3 | null>(null);
 
-  // Load avatar mesh (no animations expected here)
+  // Face manager (blink + focus) lives per character instance
+  const faceRef = useRef(
+    new FaceManager({
+      blink: { minInterval: 2.5, maxInterval: 6.0, speed: 12, intensity: 1.0 },
+      focus: {
+        neck: { maxYaw: 0.30, maxPitch: 0.20, strength: 1.0 },
+        head: { maxYaw: 0.55, maxPitch: 0.35, strength: 1.0 },
+        eyes: { maxYaw: 0.45, maxPitch: 0.30, strength: 0.25 },
+      },
+    })
+  );
+  const lookTarget = useRef(new Vector3());
+
+  // Load avatar
   const avatar = useGLTF(RPM_URL, true);
 
-  // Load placeholder animation clips as separate assets
+  // Load animation clips
   const idleGLB = useGLTF(IDLE_ANIM_URL, true);
   const walkGLB = useGLTF(WALK_ANIM_URL, true);
   const runGLB = useGLTF(RUN_ANIM_URL, true);
   const fallGLB = useGLTF(FALL_ANIM_URL, true);
 
-  /**
-   * Combine animation clips from all sources.
-   * These clips are bound to the avatar skeleton
-   * via useAnimations below.
-   */
   const animations = useMemo(
     () => [
       ...(idleGLB.animations ?? []),
@@ -104,7 +96,7 @@ export function CharacterModel({
 
   const { actions } = useAnimations(animations, group);
 
-  // Enable shadows on avatar meshes
+  // Enable shadows
   useEffect(() => {
     avatar.scene.traverse((child: any) => {
       if ("material" in child) {
@@ -114,56 +106,63 @@ export function CharacterModel({
     });
   }, [avatar.scene]);
 
-  /**
-   * Locate the root bone once after the avatar loads.
-   * This is usually the hips or first bone in the skeleton.
-   *
-   * We cache its initial position so we can restore it
-   * every frame and cancel root motion.
-   */
+  // Attach face manager to avatar (blink targets + bones)
+  useEffect(() => {
+    faceRef.current.attachToAvatar(avatar.scene);
+  }, [avatar.scene]);
+
+  // Find hips/root bone for temporary root-motion suppression
   useEffect(() => {
     let found: Bone | null = null;
 
     avatar.scene.traverse((obj: any) => {
       if (found) return;
-      if (obj.isSkinnedMesh && obj.skeleton?.bones?.length) {
-        found = obj.skeleton.bones[0];
-      }
+      if (!obj.isSkinnedMesh || !obj.skeleton?.bones?.length) return;
+
+      const byName =
+        obj.skeleton.getBoneByName?.("Hips") ||
+        obj.skeleton.getBoneByName?.("mixamorigHips") ||
+        obj.skeleton.bones.find((b: any) => b.name?.toLowerCase().includes("hips")) ||
+        null;
+
+      found = byName ?? obj.skeleton.bones[0];
     });
 
     rootBoneRef.current = found;
     rootBasePosRef.current = found ? found.position.clone() : null;
 
-    if (found) {
-      console.log("Root bone locked (temporary fix):", found.name);
-    }
+    console.log("Root bone locked (temporary fix):", found?.name);
   }, [avatar.scene]);
 
-  /**
-   * TEMPORARY ROOT MOTION SUPPRESSION
-   *
-   * Placeholder run animations include forward translation.
-   * Physics already controls world position, so this causes
-   * snapping and jitter unless neutralized.
-   *
-   * This block forces the root bone to stay at its
-   * original X/Z position every frame.
-   *
-   * REMOVE THIS when using proper in-place animations.
-   */
-  useFrame(() => {
+  // Per-frame updates: cancel root motion + face updates (blink + look)
+  useFrame((state, delta) => {
+    // TEMP root motion suppression (remove later when animations are in-place)
     const root = rootBoneRef.current;
     const base = rootBasePosRef.current;
-    if (!root || !base) return;
+    if (root && base) {
+      root.position.x = base.x;
+      root.position.z = base.z;
+    }
 
-    root.position.x = base.x;
-    root.position.z = base.z;
-  });
+    // Look at the camera (slight upward bias for eye contact)
+    lookTarget.current.copy(state.camera.position);
+    lookTarget.current.y += 0.1;
 
-  /**
-   * Animation state selection and blending.
-   * Movement logic remains purely physics-driven.
-   */
+    // Apply blink + look AFTER animations have posed the skeleton this frame
+    faceRef.current.update(delta, lookTarget.current);
+  }, 1);
+
+
+  // Optional landing blink
+  const prevGrounded = useRef<boolean>(isGrounded);
+  useEffect(() => {
+    if (prevGrounded.current === false && isGrounded === true) {
+      faceRef.current.onLand();
+    }
+    prevGrounded.current = isGrounded;
+  }, [isGrounded]);
+
+  // Animation selection + blending
   useEffect(() => {
     const next =
       !isGrounded
@@ -177,6 +176,7 @@ export function CharacterModel({
     if (!next) return;
 
     if (current && current.name === next.name) {
+      next.action.timeScale = isSprinting ? 1.25 : 1;
       if (!next.action.isRunning()) next.action.play();
       return;
     }
