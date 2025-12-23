@@ -126,6 +126,9 @@ export class FocusManager {
   }
 
   private aimBone(bone: Bone, restQ: Quaternion, worldTarget: Vector3, opts: AimOpts) {
+
+    const DOWN_BIAS = 0.5; // ~15 degrees downward
+
     const parent = bone.parent as Object3D | null;
     if (!parent) return;
 
@@ -145,7 +148,7 @@ export class FocusManager {
     const z = this.opts.forwardAxis === "+Z" ? dirLocal.z : -dirLocal.z;
 
     const yaw = Math.atan2(dirLocal.x, z);
-    const pitch = Math.atan2(-dirLocal.y, Math.sqrt(dirLocal.x * dirLocal.x + z * z));
+    const pitch = Math.atan2(-dirLocal.y, Math.sqrt(dirLocal.x * dirLocal.x + z * z)) + DOWN_BIAS;
 
     const cyaw = clamp(yaw, -opts.maxYaw, opts.maxYaw);
     const cpitch = clamp(pitch, -opts.maxPitch, opts.maxPitch);
