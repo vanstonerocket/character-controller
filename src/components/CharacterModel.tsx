@@ -10,10 +10,34 @@ type CharacterModelProps = {
   isMoving: boolean;
   isSprinting: boolean;
   isGrounded: boolean;
+
+  /**
+   * Optional Ready Player Me GLB URL.
+   * If omitted, falls back to DEFAULT_RPM_MODEL_URL.
+   */
+  avatarUrl?: string;
 } & JSX.IntrinsicElements["group"];
 
-const RPM_URL =
-  "https://models.readyplayer.me/6851995def31fd3e1a8f1fdb.glb?morphTargets=ARKit,OculusVisemes";
+const DEFAULT_RPM_MODEL_URL =
+  "https://models.readyplayer.me/6851995def31fd3e1a8f1fdb.glb";
+
+// Split args out so they can be appended later.
+const RPM_QUERY_ARGS = {
+  morphTargets: "ARKit,OculusVisemes",
+} as const;
+
+function buildAvatarUrl(baseUrl: string): string {
+  // Preserve any existing query params on the provided URL, then add ours.
+  const [path, queryString] = baseUrl.split("?");
+  const params = new URLSearchParams(queryString ?? "");
+
+  for (const [key, value] of Object.entries(RPM_QUERY_ARGS)) {
+    params.set(key, value);
+  }
+
+  const finalQuery = params.toString();
+  return finalQuery ? `${path}?${finalQuery}` : path;
+}
 
 /**
  * NOTE:
@@ -49,6 +73,7 @@ export function CharacterModel({
   isMoving,
   isSprinting,
   isGrounded,
+  avatarUrl,
   ...props
 }: CharacterModelProps) {
   const group = useRef<Group>(null);
@@ -75,8 +100,14 @@ export function CharacterModel({
   );
   const lookTarget = useRef(new Vector3());
 
-  // Load avatar
-  const avatar = useGLTF(RPM_URL, true);
+  // Build the final URL from either the provided URL or the default.
+  const resolvedAvatarUrl = useMemo(() => {
+    const base = (avatarUrl?.trim() ? avatarUrl.trim() : DEFAULT_RPM_MODEL_URL);
+    return buildAvatarUrl(base);
+  }, [avatarUrl]);
+
+  // Load avatar (keyed by resolvedAvatarUrl so it reloads when URL changes)
+  const avatar = useGLTF(resolvedAvatarUrl, true);
 
   // Load animation clips
   const idleGLB = useGLTF(IDLE_ANIM_URL, true);
@@ -151,7 +182,6 @@ export function CharacterModel({
     // Apply blink + look AFTER animations have posed the skeleton this frame
     faceRef.current.update(delta, lookTarget.current);
   }, 1);
-
 
   // Optional landing blink
   const prevGrounded = useRef<boolean>(isGrounded);
