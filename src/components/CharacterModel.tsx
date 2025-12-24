@@ -97,23 +97,6 @@ export function CharacterModel({
     });
   }, [avatar.scene]);
 
-  useEffect(() => {
-    const idle = actions.idle;
-    if (!idle) return;
-
-    // Stop others just in case
-    Object.entries(actions).forEach(([name, action]) => {
-      if (name !== "idle") action?.stop();
-    });
-
-    idle.reset().fadeIn(0.15).play();
-
-    return () => {
-      idle.fadeOut(0.1);
-      idle.stop();
-    };
-  }, [actions]);
-
   // Attach face manager
   useEffect(() => {
     faceRef.current.attachToAvatar(avatar.scene);
@@ -137,30 +120,30 @@ export function CharacterModel({
 
   // If/when you want to re-enable playback later, you can uncomment this:
   //
-  // useEffect(() => {
-  //   const next =
-  //     !isGrounded
-  //       ? resolveAction(actions as any, ["fall", "falling"])
-  //       : !isMoving
-  //         ? resolveAction(actions as any, ["idle"])
-  //         : isSprinting
-  //           ? resolveAction(actions as any, ["run", "running"])
-  //           : resolveAction(actions as any, ["walk", "walking"]);
-  //
-  //   if (!next) return;
-  //
-  //   if (current && current.name === next.name) {
-  //     next.action.timeScale = isSprinting ? 1.25 : 1;
-  //     if (!next.action.isRunning()) next.action.play();
-  //     return;
-  //   }
-  //
-  //   next.action.reset().play();
-  //   next.action.timeScale = isSprinting ? 1.25 : 1;
-  //
-  //   if (current?.action) current.action.crossFadeTo(next.action, 0.15, true);
-  //   setCurrent(next);
-  // }, [actions, isMoving, isSprinting, isGrounded, current, isSprinting]);
+  useEffect(() => {
+    const next =
+      !isGrounded
+        ? resolveAction(actions as any, ["fall", "falling"])
+        : !isMoving
+          ? resolveAction(actions as any, ["idle"])
+          : isSprinting
+            ? resolveAction(actions as any, ["run", "running"])
+            : resolveAction(actions as any, ["walk", "walking"]);
+
+    if (!next) return;
+
+    if (current && current.name === next.name) {
+      next.action.timeScale = isSprinting ? 1.25 : 1;
+      if (!next.action.isRunning()) next.action.play();
+      return;
+    }
+
+    next.action.reset().play();
+    next.action.timeScale = isSprinting ? 1.25 : 1;
+
+    if (current?.action) current.action.crossFadeTo(next.action, 0.15, true);
+    setCurrent(next);
+  }, [actions, isMoving, isSprinting, isGrounded, current, isSprinting]);
 
   return (
     <group ref={group} {...props}>
