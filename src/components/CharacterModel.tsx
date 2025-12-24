@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Group, Vector3 } from "three";
 import type { AnimationAction } from "three";
 
@@ -78,6 +78,7 @@ export function CharacterModel({
   );
 
   const lookTarget = useRef(new Vector3());
+  const faceAttached = useRef(false);
 
   const resolvedAvatarUrl = useMemo(() => {
     const base = avatarUrl?.trim() ? avatarUrl.trim() : DEFAULT_RPM_MODEL_URL;
@@ -108,6 +109,12 @@ export function CharacterModel({
         child.receiveShadow = true;
       }
     });
+  }, [avatar.scene]);
+
+  // Attach face manager as early as possible
+  useLayoutEffect(() => {
+    faceRef.current.attachToAvatar(avatar.scene);
+    faceAttached.current = true;
   }, [avatar.scene]);
 
   // Drive animations from movement state (idle/walk/run/fall)
@@ -141,29 +148,20 @@ export function CharacterModel({
     }
 
     currentRef.current = next;
-
-    return () => {
-      // optional: stop everything on unmount
-      // Object.values(actions).forEach((a) => a?.stop());
-    };
   }, [actions, isMoving, isSprinting, isGrounded]);
 
-
-  // Per-frame: face update (run AFTER animation mixer updates)
+  // Per-frame: face update after everything else
   useFrame((state, delta) => {
+    if (!faceAttached.current) return;
+
     lookTarget.current.copy(state.camera.position);
     lookTarget.current.y += 0.1;
 
-    // ensure world matrices are current before face solver reads or writes
-    avatar.scene.updateMatrixWorld(true);
-
     faceRef.current.update(delta, lookTarget.current);
-  }, 10);
+  }, -10);
 
-  // right after attach
   useEffect(() => {
-    faceRef.current.attachToAvatar(avatar.scene);
-    avatar.scene.updateMatrixWorld(true);
+    console.log("Face attached:", faceAttached.current);
   }, [avatar.scene]);
 
   // Optional landing blink
