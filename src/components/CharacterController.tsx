@@ -1,3 +1,5 @@
+// CharacterController.tsx
+
 import React, { useImperativeHandle, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Vector3, MathUtils } from "three";
@@ -205,6 +207,7 @@ export const CharacterController = React.forwardRef<any>((_, ref) => {
       ref={rigidBody}
       colliders={false}
       position={[0.0, 0.0, 1]}
+      mass={50}
       lockRotations
       type="dynamic"
     >

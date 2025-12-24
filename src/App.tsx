@@ -1,3 +1,5 @@
+// App.tsx
+
 import React from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { KeyboardControls, Environment } from '@react-three/drei';
