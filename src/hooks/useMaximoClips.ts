@@ -157,6 +157,7 @@ export function useMaximoClips(avatarRoot?: Object3D | null): UseMaximoClipsResu
         const finalMap: BoneNameMap = { ...autoMap, ...manualMap };
 
         return rawClips.map((clip) => removeHipsPositionTracks(renameClipTracks(clip, finalMap)));
+        //return rawClips.map((clip) => renameClipTracks(clip, finalMap));
     }, [avatarRoot, rawClips]);
 
     return { rawClips, mappedClips };

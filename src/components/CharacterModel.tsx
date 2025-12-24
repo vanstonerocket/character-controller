@@ -55,6 +55,12 @@ export function CharacterModel({
     action: AnimationAction;
   } | null>(null);
 
+  // Drive transitions from a ref so the effect does not re-run due to setState.
+  const currentRef = useRef<{
+    name: string;
+    action: AnimationAction;
+  } | null>(null);
+
   const faceRef = useRef(
     new FaceManager({
       blink: { minInterval: 2.5, maxInterval: 6.0, speed: 12, intensity: 1.0 },
@@ -79,12 +85,14 @@ export function CharacterModel({
   // Mixamo clips (loaded + mapped) via hook
   const { rawClips, mappedClips } = useMaximoClips(avatar.scene);
 
-  // Create actions, but do not play anything yet
+  // Create actions
   const { actions } = useAnimations(mappedClips, group);
 
-  // Debug print: action names
+  // Debug print: action names (keep)
   useEffect(() => {
     console.log("Actions:", Object.keys(actions));
+    console.log("Raw clip names:", rawClips.map((c) => c.name));
+    console.log("Mapped clip names:", mappedClips.map((c) => c.name));
   }, [actions, rawClips, mappedClips]);
 
   // Enable shadows
@@ -102,7 +110,7 @@ export function CharacterModel({
     faceRef.current.attachToAvatar(avatar.scene);
   }, [avatar.scene]);
 
-  // Per-frame: face update only
+  // Per-frame: face update
   useFrame((state, delta) => {
     lookTarget.current.copy(state.camera.position);
     lookTarget.current.y += 0.1;
@@ -118,9 +126,10 @@ export function CharacterModel({
     prevGrounded.current = isGrounded;
   }, [isGrounded]);
 
-  // If/when you want to re-enable playback later, you can uncomment this:
-  //
+  // Animation state machine: idle / walk / run / fall
   useEffect(() => {
+    if (!actions || Object.keys(actions).length === 0) return;
+
     const next =
       !isGrounded
         ? resolveAction(actions as any, ["fall", "falling"])
@@ -132,18 +141,30 @@ export function CharacterModel({
 
     if (!next) return;
 
-    if (current && current.name === next.name) {
+    const cur = currentRef.current;
+
+    // Same animation: only update speed and ensure playing
+    if (cur && cur.name === next.name) {
       next.action.timeScale = isSprinting ? 1.25 : 1;
       if (!next.action.isRunning()) next.action.play();
       return;
     }
 
-    next.action.reset().play();
+    // Start the next action
+    next.action.reset();
     next.action.timeScale = isSprinting ? 1.25 : 1;
+    next.action.play();
 
-    if (current?.action) current.action.crossFadeTo(next.action, 0.15, true);
+    // Crossfade from current to next
+    if (cur?.action) {
+      cur.action.crossFadeTo(next.action, 0.15, true);
+    } else {
+      next.action.fadeIn(0.15);
+    }
+
+    currentRef.current = next;
     setCurrent(next);
-  }, [actions, isMoving, isSprinting, isGrounded, current, isSprinting]);
+  }, [actions, isMoving, isSprinting, isGrounded]);
 
   return (
     <group ref={group} {...props}>
