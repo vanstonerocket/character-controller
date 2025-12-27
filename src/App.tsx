@@ -27,6 +27,9 @@ import { Leva } from 'leva';
 import { MobileControlsProvider } from './contexts/MobileControlsContext';
 import { MobileControls } from './components/MobileControls';
 
+import { useTextToSpeech } from './hooks/useTextToSpeech';
+import { TextToSpeechPanel } from './components/TextToSpeechPanel';
+
 const characterRef = { current: null };
 
 // ---- Ready Player Me constants ----
@@ -79,6 +82,8 @@ function App() {
   const [isAvatarModalOpen, setIsAvatarModalOpen] = React.useState(false);
   const [avatarUrlFromRpm, setAvatarUrlFromRpm] = React.useState<string | undefined>(undefined);
   const rpmFrameRef = React.useRef<HTMLIFrameElement | null>(null);
+
+  const tts = useTextToSpeech({ endpoint: '/api/tts' });
 
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -186,6 +191,13 @@ function App() {
             { name: 'sprint', keys: ['ShiftLeft', 'ShiftRight'] }
           ]}
         >
+          <TextToSpeechPanel
+            speak={tts.speak}
+            stop={tts.stop}
+            ttsBusy={tts.ttsBusy}
+            ttsError={tts.ttsError}
+            audioRef={tts.audioRef}
+          />
           <Canvas shadows>
             <Environment preset="sunset" intensity={1} background blur={0.8} resolution={256} />
             <ambientLight intensity={lighting.ambientIntensity} />
@@ -207,7 +219,11 @@ function App() {
               shadow-normalBias={0.02}
             />
             <Physics interpolate={false} positionIterations={5} velocityIterations={4}>
-              <CharacterController ref={characterRef} avatarUrl={avatarUrlFromRpm} />
+              <CharacterController
+                ref={characterRef}
+                avatarUrl={avatarUrlFromRpm}
+                ttsAudioRef={tts.audioRef}
+              />
               <Ground />
             </Physics>
             <FollowCamera target={characterRef} />

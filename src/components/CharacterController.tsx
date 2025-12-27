@@ -24,10 +24,11 @@ const DEBUG_GROUND = false;
 
 type CharacterControllerProps = {
   avatarUrl?: string;
+  ttsAudioRef?: React.RefObject<HTMLAudioElement>;
 };
 
 export const CharacterController = React.forwardRef<any, CharacterControllerProps>(
-  ({ avatarUrl }, ref) => {
+  ({ avatarUrl, ttsAudioRef }, ref) => {
     const rigidBody = useRef<RigidBodyApi>(null);
     const modelRef = useRef<THREE.Group>(null);
 
@@ -233,6 +234,7 @@ export const CharacterController = React.forwardRef<any, CharacterControllerProp
             isSprinting={isSprinting}
             isGrounded={isGrounded}
             rigidBody={rigidBody}
+            ttsAudioRef={ttsAudioRef}
           />
         </group>
       </RigidBody>

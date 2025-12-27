@@ -1,17 +1,16 @@
-//CharacterModel.tsx
+// CharacterModel.tsx
 
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRapier } from "@react-three/rapier";
-import { Group, Vector3 } from "three";
+import { Group, Vector3, MathUtils } from "three";
 import type { AnimationAction } from "three";
-
-import { interactionGroups } from "@react-three/rapier";
+import * as THREE from "three";
 
 import { FaceManager } from "../utils/FaceManager";
 import { useMaximoClips } from "../hooks/useMaximoClips";
-import { useFootLockingIK } from "../hooks/useFootLockingIK";
+import { useAudioLipSync } from "../hooks/useAudioLipSync";
 
 type CharacterModelProps = {
   isMoving: boolean;
@@ -19,6 +18,7 @@ type CharacterModelProps = {
   isGrounded: boolean;
   avatarUrl?: string;
   rigidBody?: React.RefObject<any>;
+  ttsAudioRef?: React.RefObject<HTMLAudioElement>;
 } & JSX.IntrinsicElements["group"];
 
 const DEFAULT_RPM_MODEL_URL =
@@ -48,15 +48,66 @@ function resolveAction(
   return null;
 }
 
+// Prefer head/face meshes, avoid eyes
+function findBestFaceMorphMesh(root: THREE.Object3D): THREE.Mesh | null {
+  const candidates: THREE.Mesh[] = [];
+
+  root.traverse((obj: any) => {
+    const isMesh = obj && (obj.isMesh || obj.isSkinnedMesh);
+    if (!isMesh) return;
+    if (!obj.morphTargetDictionary || !obj.morphTargetInfluences) return;
+    candidates.push(obj as THREE.Mesh);
+  });
+
+  if (candidates.length === 0) return null;
+
+  const score = (m: THREE.Mesh) => {
+    const name = ((m as any).name ?? "").toLowerCase();
+    const dict = (m as any).morphTargetDictionary as Record<string, number> | undefined;
+    const keys = dict ? Object.keys(dict) : [];
+
+    let s = 0;
+
+    if (name.includes("head")) s += 100;
+    if (name.includes("face")) s += 80;
+    if (name.includes("wolf3d")) s += 30;
+
+    if (name.includes("eye")) s -= 100;
+    if (name.includes("teeth")) s -= 60;
+    if (name.includes("tongue")) s -= 40;
+
+    if (keys.includes("jawOpen") || keys.includes("JawOpen")) s += 30;
+    if (keys.includes("mouthClose") || keys.includes("MouthClose")) s += 15;
+
+    return s;
+  };
+
+  candidates.sort((a, b) => score(b) - score(a));
+  return candidates[0];
+}
+
+function morphIndex(
+  dict: Record<string, number> | undefined,
+  candidates: string[]
+): number | null {
+  if (!dict) return null;
+  for (const key of candidates) {
+    if (key in dict) return dict[key];
+  }
+  return null;
+}
+
 export function CharacterModel({
   isMoving,
   isSprinting,
   isGrounded,
   avatarUrl,
   rigidBody,
+  ttsAudioRef,
   ...props
 }: CharacterModelProps) {
   const group = useRef<Group>(null);
+  const debugEveryRef = useRef(0); // ✅ inside component
 
   const [current, setCurrent] = useState<{
     name: string;
@@ -87,21 +138,6 @@ export function CharacterModel({
   }, [avatarUrl]);
 
   const avatar = useGLTF(resolvedAvatarUrl, true);
-
-  const { rapier, world } = useRapier();
-
-
-  // FOOT LOCKING DOES NOT CURRENTLY WORK. REASONS ARE UNCLEAR AS TO WHY.
-  // Foot locking hook
-  //useFootLockingIK(avatar.scene, isGrounded, rapier, world, {
-  //  debugLog: true,
-  //  rayUp: 0.8,
-  //  rayLen: 2.0,
-
-  //  raycastGroups: 0x00010004, // floor collider collisionGroups
-  //  excludeRigidBody: rigidBody?.current ?? null,
-  //});
-
 
   const { rawClips, mappedClips } = useMaximoClips(avatar.scene);
   const { actions } = useAnimations(mappedClips, avatar.scene);
@@ -172,6 +208,83 @@ export function CharacterModel({
     currentRef.current = next;
     setCurrent(next);
   }, [actions, isMoving, isSprinting, isGrounded]);
+
+  // ---- Lip sync setup ----
+  const faceMeshRef = useRef<THREE.Mesh | null>(null);
+  const jawIdxRef = useRef<number | null>(null);
+  const closeIdxRef = useRef<number | null>(null);
+  const funnelIdxRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const mesh = findBestFaceMorphMesh(avatar.scene);
+    faceMeshRef.current = mesh;
+
+    jawIdxRef.current = null;
+    closeIdxRef.current = null;
+    funnelIdxRef.current = null;
+
+    if (!mesh) {
+      console.warn("LipSync: no morph-target mesh found on avatar");
+      return;
+    }
+
+    const dict = (mesh as any).morphTargetDictionary as Record<string, number> | undefined;
+
+    // Your logs show lower-case keys like jawOpen/mouthClose/mouthFunnel
+    jawIdxRef.current = morphIndex(dict, ["jawOpen", "JawOpen"]);
+    closeIdxRef.current = morphIndex(dict, ["mouthClose", "MouthClose"]);
+    funnelIdxRef.current = morphIndex(dict, ["mouthFunnel", "MouthFunnel", "mouthPucker", "MouthPucker"]);
+
+    // console.log("LipSync mesh:", (mesh as any).name, Object.keys(dict ?? {}));
+  }, [avatar.scene]);
+
+  const lip = useAudioLipSync(ttsAudioRef ?? ({ current: null } as any));
+
+
+
+
+  useFrame(() => {
+    const audioEl = ttsAudioRef?.current;
+    const mesh = faceMeshRef.current as any;
+    if (!audioEl || !mesh?.morphTargetInfluences) return;
+
+    const isPlaying = !audioEl.paused && !audioEl.ended;
+
+    const jawIdx = jawIdxRef.current;
+    const closeIdx = closeIdxRef.current;
+    const funnelIdx = funnelIdxRef.current;
+
+    if (!isPlaying) {
+      if (jawIdx !== null) mesh.morphTargetInfluences[jawIdx] *= 0.85;
+      if (closeIdx !== null) mesh.morphTargetInfluences[closeIdx] *= 0.85;
+      if (funnelIdx !== null) mesh.morphTargetInfluences[funnelIdx] *= 0.85;
+      return;
+    }
+
+    const s = lip.sample();
+
+    if (jawIdx !== null) {
+      mesh.morphTargetInfluences[jawIdx] = MathUtils.clamp(s.jaw, 0, 1);
+    }
+
+    if (closeIdx !== null) {
+      mesh.morphTargetInfluences[closeIdx] = MathUtils.clamp((1 - s.jaw) * 0.6, 0, 1);
+    }
+
+    if (funnelIdx !== null) {
+      mesh.morphTargetInfluences[funnelIdx] = MathUtils.clamp(s.lips * 0.6, 0, 1);
+    }
+
+    //debugEveryRef.current++;
+    //if (debugEveryRef.current % 60 === 0) {
+    // console.log("[LipSync]", {
+    //    paused: audioEl.paused,
+    //    ended: audioEl.ended,
+    //    time: audioEl.currentTime,
+    //    sample: s
+    //  });
+    //}
+  }, 2);
 
   return (
     <group ref={group} {...props}>
