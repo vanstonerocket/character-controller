@@ -1,19 +1,24 @@
-// CharacterModel.tsx
+//CharacterModel.tsx
 
 import { useFrame } from "@react-three/fiber";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRapier } from "@react-three/rapier";
 import { Group, Vector3 } from "three";
 import type { AnimationAction } from "three";
 
+import { interactionGroups } from "@react-three/rapier";
+
 import { FaceManager } from "../utils/FaceManager";
 import { useMaximoClips } from "../hooks/useMaximoClips";
+import { useFootLockingIK } from "../hooks/useFootLockingIK";
 
 type CharacterModelProps = {
   isMoving: boolean;
   isSprinting: boolean;
   isGrounded: boolean;
   avatarUrl?: string;
+  rigidBody?: React.RefObject<any>;
 } & JSX.IntrinsicElements["group"];
 
 const DEFAULT_RPM_MODEL_URL =
@@ -48,6 +53,7 @@ export function CharacterModel({
   isSprinting,
   isGrounded,
   avatarUrl,
+  rigidBody,
   ...props
 }: CharacterModelProps) {
   const group = useRef<Group>(null);
@@ -57,7 +63,6 @@ export function CharacterModel({
     action: AnimationAction;
   } | null>(null);
 
-  // Drive transitions from a ref so the effect does not re-run due to setState.
   const currentRef = useRef<{
     name: string;
     action: AnimationAction;
@@ -81,23 +86,33 @@ export function CharacterModel({
     return buildAvatarUrl(base);
   }, [avatarUrl]);
 
-  // Avatar GLB
   const avatar = useGLTF(resolvedAvatarUrl, true);
 
-  // Mixamo clips (loaded + mapped) via hook
+  const { rapier, world } = useRapier();
+
+
+  // FOOT LOCKING DOES NOT CURRENTLY WORK. REASONS ARE UNCLEAR AS TO WHY.
+  // Foot locking hook
+  //useFootLockingIK(avatar.scene, isGrounded, rapier, world, {
+  //  debugLog: true,
+  //  rayUp: 0.8,
+  //  rayLen: 2.0,
+
+  //  raycastGroups: 0x00010004, // floor collider collisionGroups
+  //  excludeRigidBody: rigidBody?.current ?? null,
+  //});
+
+
   const { rawClips, mappedClips } = useMaximoClips(avatar.scene);
+  const { actions } = useAnimations(mappedClips, avatar.scene);
 
-  // Create actions
-  const { actions } = useAnimations(mappedClips, group);
-
-  // Debug print: action names (keep)
   useEffect(() => {
-    console.log("Actions:", Object.keys(actions));
-    console.log("Raw clip names:", rawClips.map((c) => c.name));
-    console.log("Mapped clip names:", mappedClips.map((c) => c.name));
-  }, [actions, rawClips, mappedClips]);
+    if (!actions) return;
+    Object.values(actions).forEach((a) => a?.stop());
+    currentRef.current = null;
+    setCurrent(null);
+  }, [resolvedAvatarUrl, actions]);
 
-  // Enable shadows
   useEffect(() => {
     avatar.scene.traverse((child: any) => {
       if ("material" in child) {
@@ -107,19 +122,16 @@ export function CharacterModel({
     });
   }, [avatar.scene]);
 
-  // Attach face manager
   useEffect(() => {
     faceRef.current.attachToAvatar(avatar.scene);
   }, [avatar.scene]);
 
-  // Per-frame: face update
   useFrame((state, delta) => {
     lookTarget.current.copy(state.camera.position);
     lookTarget.current.y += 0.1;
     faceRef.current.update(delta, lookTarget.current);
   }, 1);
 
-  // Optional landing blink
   const prevGrounded = useRef<boolean>(isGrounded);
   useEffect(() => {
     if (prevGrounded.current === false && isGrounded === true) {
@@ -128,7 +140,6 @@ export function CharacterModel({
     prevGrounded.current = isGrounded;
   }, [isGrounded]);
 
-  // Animation state machine: idle / walk / run / fall
   useEffect(() => {
     if (!actions || Object.keys(actions).length === 0) return;
 
@@ -145,24 +156,18 @@ export function CharacterModel({
 
     const cur = currentRef.current;
 
-    // Same animation: only update speed and ensure playing
     if (cur && cur.name === next.name) {
       next.action.timeScale = isSprinting ? 1.25 : 1;
       if (!next.action.isRunning()) next.action.play();
       return;
     }
 
-    // Start the next action
     next.action.reset();
     next.action.timeScale = isSprinting ? 1.25 : 1;
     next.action.play();
 
-    // Crossfade from current to next
-    if (cur?.action) {
-      cur.action.crossFadeTo(next.action, 0.15, true);
-    } else {
-      next.action.fadeIn(0.15);
-    }
+    if (cur?.action) cur.action.crossFadeTo(next.action, 0.15, true);
+    else next.action.fadeIn(0.15);
 
     currentRef.current = next;
     setCurrent(next);

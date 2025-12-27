@@ -47,7 +47,7 @@ export class BlinkManager {
 
     this.targets = collected;
 
-    console.log("BlinkManager targets:", collected.length);
+    //console.log("BlinkManager targets:", collected.length);
 
     this.timer = 0;
     this.value = 0;

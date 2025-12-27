@@ -100,12 +100,12 @@ export class FocusManager {
 
     // Helpful log while wiring up
     // eslint-disable-next-line no-console
-    console.log("Focus bones:", {
-      neck: this.neck?.name,
-      head: this.head?.name,
-      leftEye: this.leftEye?.name,
-      rightEye: this.rightEye?.name,
-    });
+    //console.log("Focus bones:", {
+    //  neck: this.neck?.name,
+    //  head: this.head?.name,
+    //  leftEye: this.leftEye?.name,
+    //  rightEye: this.rightEye?.name,
+    //});
   }
 
   update(_delta: number, worldTarget: Vector3) {

@@ -1,4 +1,6 @@
-import React, { useMemo, useRef } from "react";
+// Ground.tsx
+
+import React, { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { RigidBody, CuboidCollider } from "@react-three/rapier";
 import { Decal } from "@react-three/drei";
@@ -9,19 +11,21 @@ type GroundProps = {
 };
 
 export function Ground({ target }: GroundProps) {
-  // Arena sizing
-  const groundY = -1;
+  // ===== WORLD CONSTANTS =====
+  const groundY = 0;
+  const groundThickness = 0.05;
   const groundSize = 15;
 
   const wallHeight = 10;
   const wallThickness = 1;
+
+  // Walls sit on top of the ground plane
   const wallCenterY = groundY + wallHeight / 2;
 
-  // Render-only floor mesh (Decal projects onto this geometry)
+  // ===== DECAL =====
   const floorRef = useRef<THREE.Mesh>(null);
-  const decalPos = useRef(new Vector3(0, 0, 0));
+  const decalPos = useRef(new Vector3());
 
-  // Create a soft circular texture at runtime (no asset file needed)
   const circleTex = useMemo(() => {
     const size = 256;
     const canvas = document.createElement("canvas");
@@ -40,7 +44,6 @@ export function Ground({ target }: GroundProps) {
     grad.addColorStop(0.95, "rgba(0,0,0,0.25)");
     grad.addColorStop(1.0, "rgba(0,0,0,0.0)");
 
-    ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
 
@@ -49,25 +52,41 @@ export function Ground({ target }: GroundProps) {
     return tex;
   }, []);
 
-  // Follow character X/Z only
-  useFrame(() => {
-    const p = target?.current?.position;
-    if (!p) return;
 
-    decalPos.current.set(p.x, 0, p.z);
+  // Follow character X/Z, stay on ground plane
+  useFrame(() => {
+    const posObj = target?.current?.position;
+    if (!posObj?.clone) return;
+
+    const p = posObj.clone(); // Vector3 from CharacterController
+    decalPos.current.set(p.x, groundY, p.z);
   });
+
+  //useEffect(() => {
+  //  console.log("GROUND CHECK", {
+  //    groundY,
+  //    floorMeshY: floorRef.current?.position.y,
+  //  });
+  //console.log("FLOOR COLLIDER CHECK", {
+  //  groundY,
+  //  groundThickness,
+  //  colliderCenterY: groundY - groundThickness,
+  //  colliderTopY: (groundY - groundThickness) + groundThickness,
+  //});
+  //}, []);
 
   return (
     <group>
-      {/* Physics floor only (invisible) */}
+      {/* ===== FLOOR PHYSICS ===== */}
       <RigidBody type="fixed" colliders={false}>
         <CuboidCollider
-          args={[groundSize / 2, 0.05, groundSize / 2]}
-          position={[0, groundY, 0]}
+          args={[groundSize / 2, groundThickness, groundSize / 2]}
+          position={[0, groundY - groundThickness, 0]}
+          collisionGroups={0x00010004} // floor: member 1, mask 4
         />
       </RigidBody>
 
-      {/* Render-only floor mesh that Decal projects onto */}
+      {/* ===== FLOOR RENDER ===== */}
       <mesh
         ref={floorRef}
         position={[0, groundY, 0]}
@@ -75,48 +94,54 @@ export function Ground({ target }: GroundProps) {
         receiveShadow
       >
         <planeGeometry args={[groundSize, groundSize]} />
+        <meshStandardMaterial
+          map={circleTex}
+          transparent
+          opacity={1}
 
-        {/* This hides the floor mesh without hiding children (Decal) */}
-        <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+        />
 
-        {/* Decal: circular mark under the character */}
         {circleTex && (
           <Decal
             position={decalPos.current}
             rotation={[0, 0, 0]}
-            scale={[10, 10, 0]} // circle size in world units
+            scale={[10, 10, 0]}
           >
             <meshStandardMaterial
               map={circleTex}
               transparent
               opacity={1}
               depthWrite={false}
-              polygonOffset
-              polygonOffsetFactor={-4}
+
             />
           </Decal>
         )}
       </mesh>
 
-      {/* Invisible physics-only walls */}
+      {/* ===== WALL PHYSICS ===== */}
+
       <RigidBody type="fixed" colliders={false}>
         <CuboidCollider
           args={[groundSize / 2, wallHeight / 2, wallThickness / 2]}
           position={[0, wallCenterY, -groundSize / 2]}
+          collisionGroups={0x00020004} // walls: member 2, mask 4
         />
         <CuboidCollider
           args={[groundSize / 2, wallHeight / 2, wallThickness / 2]}
           position={[0, wallCenterY, groundSize / 2]}
+          collisionGroups={0x00020004} // walls: member 2, mask 4
         />
         <CuboidCollider
           args={[groundSize / 2, wallHeight / 2, wallThickness / 2]}
           position={[groundSize / 2, wallCenterY, 0]}
           rotation={[0, Math.PI / 2, 0]}
+          collisionGroups={0x00020004} // walls: member 2, mask 4
         />
         <CuboidCollider
           args={[groundSize / 2, wallHeight / 2, wallThickness / 2]}
           position={[-groundSize / 2, wallCenterY, 0]}
           rotation={[0, Math.PI / 2, 0]}
+          collisionGroups={0x00020004} // walls: member 2, mask 4
         />
       </RigidBody>
     </group>
