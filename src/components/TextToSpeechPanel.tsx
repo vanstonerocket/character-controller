@@ -1,3 +1,5 @@
+// TextToSpeechPanel.tsx
+
 import * as React from "react";
 
 type VoiceOption = {
@@ -14,12 +16,13 @@ const VOICES: VoiceOption[] = [
 type Props = {
     speak: (text: string, opts?: { voiceId?: "en" | "es" | "zh" }) => Promise<void> | void;
     stop: () => void;
+    playSample: () => Promise<void> | void;
     ttsBusy: boolean;
     ttsError: string | null;
     audioRef: React.RefObject<HTMLAudioElement>;
 };
 
-export function TextToSpeechPanel({ speak, stop, ttsBusy, ttsError, audioRef }: Props) {
+export function TextToSpeechPanel({ speak, stop, playSample, ttsBusy, ttsError, audioRef }: Props) {
     const [ttsText, setTtsText] = React.useState("");
     const [selectedVoice, setSelectedVoice] = React.useState<VoiceOption["id"]>("en");
 
@@ -34,8 +37,13 @@ export function TextToSpeechPanel({ speak, stop, ttsBusy, ttsError, audioRef }: 
         stop();
     }, [stop]);
 
+    const doPlaySample = React.useCallback(() => {
+        if (ttsBusy) return;
+        void playSample();
+    }, [playSample, ttsBusy]);
+
     return (
-        <div className="fixed bottom-4 left-4 z-50 w-[min(560px,92vw)]">
+        <div className="fixed bottom-4 left-4 z-50 w-[min(800px,92vw)]">
             <div className="rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md p-3 shadow-2xl">
                 <div className="text-white/90 text-xs font-mono mb-2">Text to Speech</div>
 
@@ -79,6 +87,15 @@ export function TextToSpeechPanel({ speak, stop, ttsBusy, ttsError, audioRef }: 
                         title="Stop"
                     >
                         Stop
+                    </button>
+
+                    <button
+                        className="px-4 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition disabled:opacity-50"
+                        onClick={doPlaySample}
+                        disabled={ttsBusy}
+                        title="Play sample"
+                    >
+                        Sample
                     </button>
                 </div>
 

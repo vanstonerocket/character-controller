@@ -1,15 +1,9 @@
 // useTextToSpeech.ts
-
 import * as React from "react";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
-type UseTtsArgs = {
-    modelId?: string;
-};
-
-type SpeakOptions = {
-    voiceId?: "en" | "es" | "zh";
-};
+type UseTtsArgs = { modelId?: string };
+type SpeakOptions = { voiceId?: "en" | "es" | "zh" };
 
 const voiceMap: Record<"en" | "es" | "zh", string> = {
     en: "Awx8TeMHHpDzbm42nIB6",
@@ -43,8 +37,7 @@ function attachAudioDebug(el: HTMLAudioElement) {
     const onStalled = () => dbg("[AUDIO] stalled");
     const onWaiting = () => dbg("[AUDIO] waiting");
     const onCanPlay = () => dbg("[AUDIO] canplay", el.readyState);
-    const onMeta = () =>
-        dbg("[AUDIO] metadata", { duration: el.duration, readyState: el.readyState });
+    const onMeta = () => dbg("[AUDIO] metadata", { duration: el.duration, readyState: el.readyState });
 
     el.addEventListener("ended", onEnded);
     el.addEventListener("pause", onPause);
@@ -72,9 +65,7 @@ function attachAudioDebug(el: HTMLAudioElement) {
 async function toArrayBuffer(audio: any): Promise<ArrayBuffer> {
     if (audio instanceof ArrayBuffer) return audio;
 
-    if (audio?.arrayBuffer) {
-        return await audio.arrayBuffer();
-    }
+    if (audio?.arrayBuffer) return await audio.arrayBuffer();
 
     if (audio?.getReader) {
         const reader = audio.getReader();
@@ -100,29 +91,21 @@ async function toArrayBuffer(audio: any): Promise<ArrayBuffer> {
     throw new Error("Unsupported audio type returned from ElevenLabs SDK");
 }
 
-// Optional safety: prevents any weird "stuck play" from hanging forever
 async function playWithTimeout(el: HTMLAudioElement, timeoutMs = 4000) {
     const playPromise = el.play();
     const timeoutPromise = new Promise<never>((_, reject) => {
-        window.setTimeout(
-            () => reject(new Error("Timed out starting audio playback")),
-            timeoutMs
-        );
+        window.setTimeout(() => reject(new Error("Timed out starting audio playback")), timeoutMs);
     });
     await Promise.race([playPromise, timeoutPromise]);
 }
 
-export function useTextToSpeech(
-    { modelId = "eleven_multilingual_v2" }: UseTtsArgs = {}
-) {
+export function useTextToSpeech({ modelId = "eleven_multilingual_v2" }: UseTtsArgs = {}) {
     const [ttsBusy, setTtsBusy] = React.useState(false);
     const [ttsError, setTtsError] = React.useState<string | null>(null);
 
     const audioRef = React.useRef<HTMLAudioElement | null>(null);
     const abortRef = React.useRef<AbortController | null>(null);
     const currentObjectUrlRef = React.useRef<string | null>(null);
-
-    // Run guard: prevents old speaks from "waking up" later and playing
     const runIdRef = React.useRef(0);
 
     const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY as string | undefined;
@@ -149,7 +132,6 @@ export function useTextToSpeech(
     }, [revokeUrl]);
 
     const stop = React.useCallback(() => {
-        // Invalidate any in-flight speak
         runIdRef.current += 1;
 
         abortRef.current?.abort();
@@ -169,6 +151,51 @@ export function useTextToSpeech(
         setTtsBusy(false);
     }, [revokeUrl]);
 
+    // ✅ shared pipeline: ArrayBuffer -> Blob -> objectURL -> audio element play
+    const playArrayBufferThroughPipeline = React.useCallback(
+        async (arrayBuf: ArrayBuffer, controller: AbortController, myRunId: number) => {
+            const stillValid = () => !controller.signal.aborted && myRunId === runIdRef.current;
+
+            if (!stillValid()) return;
+
+            dbg("[TTS] received audio bytes", arrayBuf.byteLength);
+
+            revokeUrl();
+            const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
+            const objectUrl = URL.createObjectURL(blob);
+            currentObjectUrlRef.current = objectUrl;
+
+            const el = audioRef.current;
+            if (!el) throw new Error("Audio element not ready");
+
+            const detachDebug = attachAudioDebug(el);
+
+            try {
+                try {
+                    el.pause();
+                    el.currentTime = 0;
+                } catch { }
+
+                el.muted = false;
+                el.volume = 1;
+
+                el.src = objectUrl;
+                el.load();
+
+                dbg("[TTS] set src", { src: el.src, readyState: el.readyState, networkState: el.networkState });
+
+                if (!stillValid()) return;
+
+                await playWithTimeout(el, 4000);
+
+                dbg("[TTS] playing", { paused: el.paused, time: el.currentTime });
+            } finally {
+                detachDebug();
+            }
+        },
+        [revokeUrl]
+    );
+
     const speak = React.useCallback(
         async (textRaw: string, opts?: SpeakOptions) => {
             const text = textRaw.trim();
@@ -185,10 +212,8 @@ export function useTextToSpeech(
                 return;
             }
 
-            // Gesture-safe WebAudio unlock (must happen before any awaited work)
             window.__lipSyncResume?.();
 
-            // Stop first, then mark busy
             stop();
             setTtsError(null);
             setTtsBusy(true);
@@ -197,8 +222,6 @@ export function useTextToSpeech(
             abortRef.current = controller;
 
             const myRunId = ++runIdRef.current;
-            const stillValid = () =>
-                !controller.signal.aborted && myRunId === runIdRef.current;
 
             try {
                 const lang = opts?.voiceId ?? "en";
@@ -211,51 +234,9 @@ export function useTextToSpeech(
                     outputFormat: "mp3_44100_128",
                 });
 
-                if (!stillValid()) return;
-
                 const arrayBuf = await toArrayBuffer(audio);
-                if (!stillValid()) return;
 
-                dbg("[TTS] received audio bytes", arrayBuf.byteLength);
-
-                revokeUrl();
-                const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
-                const objectUrl = URL.createObjectURL(blob);
-                currentObjectUrlRef.current = objectUrl;
-
-                const el = audioRef.current;
-                if (!el) throw new Error("Audio element not ready");
-
-                const detachDebug = attachAudioDebug(el);
-
-                try {
-                    // Reset then swap src
-                    try {
-                        el.pause();
-                        el.currentTime = 0;
-                    } catch { }
-
-                    el.muted = false;
-                    el.volume = 1;
-
-                    el.src = objectUrl;
-                    el.load();
-
-                    dbg("[TTS] set src", {
-                        src: el.src,
-                        readyState: el.readyState,
-                        networkState: el.networkState,
-                    });
-
-                    if (!stillValid()) return;
-
-                    // Start playback
-                    await playWithTimeout(el, 4000);
-
-                    dbg("[TTS] playing", { paused: el.paused, time: el.currentTime });
-                } finally {
-                    detachDebug();
-                }
+                await playArrayBufferThroughPipeline(arrayBuf, controller, myRunId);
             } catch (e: any) {
                 if (e?.name === "AbortError") return;
                 setTtsError(e?.message ?? "Unknown error");
@@ -263,8 +244,37 @@ export function useTextToSpeech(
                 if (myRunId === runIdRef.current) setTtsBusy(false);
             }
         },
-        [apiKey, modelId, revokeUrl, stop]
+        [apiKey, modelId, playArrayBufferThroughPipeline, stop]
     );
 
-    return { speak, stop, ttsBusy, ttsError, audioRef };
+    // ✅ new: plays /public/voice/sample.mp3 through the SAME pipeline
+    const playSample = React.useCallback(async () => {
+        window.__lipSyncResume?.();
+
+        stop();
+        setTtsError(null);
+        setTtsBusy(true);
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        const myRunId = ++runIdRef.current;
+
+        try {
+            // /public/voice/sample.mp3 is served at /voice/sample.mp3
+            const res = await fetch("/voice/sample.mp3", { signal: controller.signal, cache: "no-store" });
+            if (!res.ok) throw new Error(`Failed to load sample mp3 (${res.status})`);
+
+            const arrayBuf = await res.arrayBuffer();
+
+            await playArrayBufferThroughPipeline(arrayBuf, controller, myRunId);
+        } catch (e: any) {
+            if (e?.name === "AbortError") return;
+            setTtsError(e?.message ?? "Unknown error");
+        } finally {
+            if (myRunId === runIdRef.current) setTtsBusy(false);
+        }
+    }, [playArrayBufferThroughPipeline, stop]);
+
+    return { speak, stop, playSample, ttsBusy, ttsError, audioRef };
 }

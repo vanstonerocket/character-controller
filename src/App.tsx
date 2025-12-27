@@ -194,6 +194,7 @@ function App() {
           <TextToSpeechPanel
             speak={tts.speak}
             stop={tts.stop}
+            playSample={tts.playSample}
             ttsBusy={tts.ttsBusy}
             ttsError={tts.ttsError}
             audioRef={tts.audioRef}
